@@ -43,19 +43,36 @@ except Exception as e:
     approximator = NTupleApproximator(board_size=4, patterns=pattern, init_value=320000, use_tc=True)
 
 # 建立遊戲環境物件 (僅用於模擬走步及檢查合法動作)
-env_sim = Game2048Env(size=4)
+env_sim = Game2048Env()
 
 def simulate_move(board, action):
     """
     模擬在 board 上執行動作 action 的結果，不會產生新的 tile。
+    這裡採用 Game2048Env 中定義的 simulate_row_move 與 is_move_legal 方法，
+    因此直接使用環境內部的邏輯（本例使用環境內 self.board 進行模擬）。
     """
-    return env_sim.simulate_move(board, action)
+    # 由於 student_agent 只用於決策，所以我們使用一份 board 複本來模擬
+    sim_env = Game2048Env()
+    sim_env.board = board.copy()
+    # 利用原本的動作模擬（注意：這裡無隨機 tile 加入）
+    if action == 0:
+        sim_env.move_up()
+    elif action == 1:
+        sim_env.move_down()
+    elif action == 2:
+        sim_env.move_left()
+    elif action == 3:
+        sim_env.move_right()
+    return sim_env.board
 
 def is_move_legal(board, action):
     """
     檢查在 board 上，動作 action 是否為合法動作（即執行後 board 有改變）。
+    使用 Game2048Env 原生的 is_move_legal 方法（模擬動作）。
     """
-    return env_sim.is_move_legal(board, action)
+    sim_env = Game2048Env()
+    sim_env.board = board.copy()
+    return sim_env.is_move_legal(action)
 
 def get_action(state, score):
     """
