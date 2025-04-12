@@ -375,11 +375,11 @@ def get_action(state, score):
         env = Game2048Env()
         approximator = NTupleApproximator(board_size=4, patterns=pattern)
         try:
-            with open("value.pkl", "rb") as f:
+            with open("value1.pkl", "rb") as f:
                 approximator.weights = pickle.load(f)
         except Exception as e:
             # 如果無法載入權重，則打印錯誤並回傳隨機動作
-            print("Warning: 無法載入 value.pkl，將以隨機動作回應。", e)
+            print("Warning: 無法載入 value1.pkl，將以隨機動作回應。", e)
             return random.choice(range(4))
     
     # 取得所有合法動作 (使用輔助函數判斷)
