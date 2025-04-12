@@ -1,14 +1,25 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+student_agent.py
+
+說明：
+1. 此程式碼讀取已訓練好的權重檔案 (value.pkl) 並建立 NTupleApproximator。
+2. 實作了 get_action(state, score) 函數，依據目前 board (state) 模擬所有合法動作，
+   並選擇使估值最大的動作 (0: up, 1: down, 2: left, 3: right)。
+3. 請確認 "value.pkl" 檔案與本程式置於同一目錄，否則程式將以預設初始權重進行。
+"""
+
 import math
-import copy
 import random
 import pickle
 import numpy as np
-import gym
-from gym import spaces
-import matplotlib.pyplot as plt
 from collections import defaultdict
 
-# 頂層定義 ConstantFactory 類別，用來作為 defaultdict 的預設值工廠
+##############################################
+# ConstantFactory：用於 defaultdict 的預設值建立
+##############################################
 class ConstantFactory:
     def __init__(self, value):
         self.value = value
@@ -16,208 +27,70 @@ class ConstantFactory:
         return self.value
 
 ##############################################
-# 以下這段是 Game2048Env 的程式碼 (不做修改)
+# 2048 遊戲環境 (只包含模擬需要的部份，不包含隨機 tile 加入)
 ##############################################
-class Game2048Env(gym.Env):
-    def __init__(self):
-        super(Game2048Env, self).__init__()
-        self.size = 4  # 4x4 2048 board
-        self.board = np.zeros((self.size, self.size), dtype=int)
-        self.score = 0
-
-        # Action space: 0: up, 1: down, 2: left, 3: right
-        self.action_space = spaces.Discrete(4)
-        self.actions = ["up", "down", "left", "right"]
-
-        self.last_move_valid = True  # Record if the last move was valid
-
-        self.reset()
-
-    def reset(self):
-        """Reset the environment"""
-        self.board = np.zeros((self.size, self.size), dtype=int)
-        self.score = 0
-        self.add_random_tile()
-        self.add_random_tile()
-        return self.board
-
-    def add_random_tile(self):
-        """Add a random tile (2 or 4) to an empty cell"""
-        empty_cells = list(zip(*np.where(self.board == 0)))
-        if empty_cells:
-            x, y = random.choice(empty_cells)
-            self.board[x, y] = 2 if random.random() < 0.9 else 4
+class Game2048Env:
+    def __init__(self, size=4):
+        self.size = size
 
     def compress(self, row):
-        """Compress the row: move non-zero values to the left"""
         new_row = row[row != 0]
         new_row = np.pad(new_row, (0, self.size - len(new_row)), mode='constant')
         return new_row
 
     def merge(self, row):
-        """Merge adjacent equal numbers in the row"""
         for i in range(len(row) - 1):
-            if row[i] == row[i + 1] and row[i] != 0:
+            if row[i] == row[i+1] and row[i] != 0:
                 row[i] *= 2
-                row[i + 1] = 0
-                self.score += row[i]
+                row[i+1] = 0
         return row
 
-    def move_left(self):
-        """Move the board left"""
-        moved = False
-        for i in range(self.size):
-            original_row = self.board[i].copy()
-            new_row = self.compress(self.board[i])
-            new_row = self.merge(new_row)
-            new_row = self.compress(new_row)
-            self.board[i] = new_row
-            if not np.array_equal(original_row, self.board[i]):
-                moved = True
-        return moved
-
-    def move_right(self):
-        """Move the board right"""
-        moved = False
-        for i in range(self.size):
-            original_row = self.board[i].copy()
-            reversed_row = self.board[i][::-1]
-            reversed_row = self.compress(reversed_row)
-            reversed_row = self.merge(reversed_row)
-            reversed_row = self.compress(reversed_row)
-            self.board[i] = reversed_row[::-1]
-            if not np.array_equal(original_row, self.board[i]):
-                moved = True
-        return moved
-
-    def move_up(self):
-        """Move the board up"""
-        moved = False
-        for j in range(self.size):
-            original_col = self.board[:, j].copy()
-            col = self.compress(self.board[:, j])
-            col = self.merge(col)
-            col = self.compress(col)
-            self.board[:, j] = col
-            if not np.array_equal(original_col, self.board[:, j]):
-                moved = True
-        return moved
-
-    def move_down(self):
-        """Move the board down"""
-        moved = False
-        for j in range(self.size):
-            original_col = self.board[:, j].copy()
-            reversed_col = self.board[:, j][::-1]
-            reversed_col = self.compress(reversed_col)
-            reversed_col = self.merge(reversed_col)
-            reversed_col = self.compress(reversed_col)
-            self.board[:, j] = reversed_col[::-1]
-            if not np.array_equal(original_col, self.board[:, j]):
-                moved = True
-        return moved
-
-    def is_game_over(self):
-        """Check if there are no legal moves left"""
-        if np.any(self.board == 0):
-            return False
-        for i in range(self.size):
-            for j in range(self.size - 1):
-                if self.board[i, j] == self.board[i, j+1]:
-                    return False
-        for j in range(self.size):
-            for i in range(self.size - 1):
-                if self.board[i, j] == self.board[i+1, j]:
-                    return False
-        return True
-
-    def step(self, action):
-        """Execute one action"""
-        assert self.action_space.contains(action), "Invalid action"
-        if action == 0:
-            moved = self.move_up()
-        elif action == 1:
-            moved = self.move_down()
-        elif action == 2:
-            moved = self.move_left()
-        elif action == 3:
-            moved = self.move_right()
-        else:
-            moved = False
-
-        self.last_move_valid = moved
-        if moved:
-            self.add_random_tile()
-        done = self.is_game_over()
-        return self.board, self.score, done, {}
-
-    def render(self, mode="human", action=None):
-        """Render the current board using Matplotlib."""
-        fig, ax = plt.subplots(figsize=(4, 4))
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.set_xlim(-0.5, self.size - 0.5)
-        ax.set_ylim(-0.5, self.size - 0.5)
-        for i in range(self.size):
-            for j in range(self.size):
-                value = self.board[i, j]
-                color = COLOR_MAP.get(value, "#3c3a32")
-                text_color = TEXT_COLOR.get(value, "white")
-                rect = plt.Rectangle((j - 0.5, i - 0.5), 1, 1, facecolor=color, edgecolor="black")
-                ax.add_patch(rect)
-                if value != 0:
-                    ax.text(j, i, str(value), ha='center', va='center',
-                            fontsize=16, fontweight='bold', color=text_color)
-        title = f"score: {self.score}"
-        if action is not None:
-            title += f" | action: {self.actions[action]}"
-        plt.title(title)
-        plt.gca().invert_yaxis()
-        plt.show()
-
-    def simulate_row_move(self, row):
-        """Simulate a left move for a single row"""
-        new_row = row[row != 0]
-        new_row = np.pad(new_row, (0, self.size - len(new_row)), mode='constant')
-        for i in range(len(new_row) - 1):
-            if new_row[i] == new_row[i+1] and new_row[i] != 0:
-                new_row[i] *= 2
-                new_row[i+1] = 0
-        new_row = new_row[new_row != 0]
-        new_row = np.pad(new_row, (0, self.size - len(new_row)), mode='constant')
-        return new_row
-
-    def is_move_legal(self, action):
-        """Check if the specified move is legal (i.e., changes the board)"""
-        temp_board = self.board.copy()
-        if action == 0:
-            for j in range(self.size):
-                col = temp_board[:, j]
-                new_col = self.simulate_row_move(col)
-                temp_board[:, j] = new_col
-        elif action == 1:
-            for j in range(self.size):
-                col = temp_board[:, j][::-1]
-                new_col = self.simulate_row_move(col)
-                temp_board[:, j] = new_col[::-1]
-        elif action == 2:
-            for i in range(self.size):
-                row = temp_board[i]
-                temp_board[i] = self.simulate_row_move(row)
-        elif action == 3:
-            for i in range(self.size):
-                row = temp_board[i][::-1]
-                new_row = self.simulate_row_move(row)
-                temp_board[i] = new_row[::-1]
+    def simulate_move(self, board, action):
+        """
+        模擬走一步，不加隨機 tile。
+        action: 0: up, 1: down, 2: left, 3: right
+        """
+        board_copy = board.copy()
+        size = self.size
+        if action == 0:  # up
+            for j in range(size):
+                col = board_copy[:, j]
+                col = self.compress(col)
+                col = self.merge(col)
+                col = self.compress(col)
+                board_copy[:, j] = col
+        elif action == 1:  # down
+            for j in range(size):
+                col = board_copy[:, j][::-1].copy()
+                col = self.compress(col)
+                col = self.merge(col)
+                col = self.compress(col)
+                board_copy[:, j] = col[::-1]
+        elif action == 2:  # left
+            for i in range(size):
+                row = board_copy[i]
+                row = self.compress(row)
+                row = self.merge(row)
+                row = self.compress(row)
+                board_copy[i] = row
+        elif action == 3:  # right
+            for i in range(size):
+                row = board_copy[i][::-1].copy()
+                row = self.compress(row)
+                row = self.merge(row)
+                row = self.compress(row)
+                board_copy[i] = row[::-1]
         else:
             raise ValueError("Invalid action")
-        return not np.array_equal(self.board, temp_board)
+        return board_copy
 
+    def is_move_legal(self, board, action):
+        simulated = self.simulate_move(board, action)
+        return not np.array_equal(simulated, board)
 
 ##############################################
-# 以下為 NTupleApproximator 與一些輔助函式（使用預設 pkl 權重）
+# NTupleApproximator 及相關對稱變換函式
 ##############################################
-# 對稱變換函式
 def identity(coord, board_size):
     return coord
 
@@ -249,18 +122,6 @@ def reflect_anti(coord, board_size):
     r, c = coord
     return (board_size - 1 - c, board_size - 1 - r)
 
-# 預設的 n-tuple 模式
-pattern = [
-    [0, 1, 2, 4, 5, 6],
-    [1, 2, 5, 6, 9, 13],
-    [0, 1, 2, 3, 4, 5],
-    [0, 1, 5, 6, 7, 10],
-    [0, 1, 2, 5, 9, 10],
-    [0, 1, 5, 9, 13, 14],
-    [0, 1, 5, 8, 9, 13],
-    [0, 1, 2, 4, 6, 10],
-]
-
 class NTupleApproximator:
     def __init__(self, board_size, patterns, init_value=320000, use_tc=False):
         self.board_size = board_size
@@ -268,11 +129,13 @@ class NTupleApproximator:
         self.use_tc = use_tc
         num_patterns = len(self.patterns)
         self.init_val_per_pattern = init_value / num_patterns if num_patterns > 0 else 0.0
-        # 使用 defaultdict 搭配頂層 ConstantFactory 確保 pickle 時能正常序列化
+        # 使用 defaultdict 與 ConstantFactory 來初始化權重
         self.weights = [defaultdict(ConstantFactory(self.init_val_per_pattern)) for _ in patterns]
         if self.use_tc:
             self.tc_E = [defaultdict(float) for _ in patterns]
             self.tc_A = [defaultdict(float) for _ in patterns]
+
+        # 產生所有對稱變換
         self.symmetry_patterns = []
         for p in self.patterns:
             syms = self.generate_symmetries(p)
@@ -296,6 +159,7 @@ class NTupleApproximator:
         return sym_patterns
 
     def tile_to_index(self, tile):
+        # 0 對應 0，其它 tile 使用 log2 得到指數
         return 0 if tile == 0 else int(math.log(tile, 2))
 
     def get_feature(self, board, coords):
@@ -306,6 +170,7 @@ class NTupleApproximator:
         total = 0.0
         num = len(self.patterns)
         for i in range(num):
+            # 對應第 i 模式，使用所有對稱版型
             group = self.symmetry_patterns[i * self.sym_per_pattern:(i + 1) * self.sym_per_pattern]
             val = 0.0
             for pat in group:
@@ -315,45 +180,97 @@ class NTupleApproximator:
         return total
 
     def update(self, board, delta, alpha):
+        # 此範例中未於 get_action 中使用 update
         num = len(self.patterns)
         for i in range(num):
             group = self.symmetry_patterns[i * self.sym_per_pattern:(i + 1) * self.sym_per_pattern]
-            n_sym = len(group)
             for pat in group:
                 feat = self.get_feature(board, pat)
-                if self.use_tc:
-                    curE = self.tc_E[i].get(feat, 0.0)
-                    curA = self.tc_A[i].get(feat, 0.0)
-                    self.tc_E[i][feat] = curE + delta
-                    self.tc_A[i][feat] = curA + abs(delta)
-                    beta = abs(self.tc_E[i][feat]) / self.tc_A[i][feat] if self.tc_A[i][feat] != 0 else 1.0
-                    curr = self.weights[i][feat]
-                    self.weights[i][feat] = curr + alpha * beta * (delta / n_sym)
-                else:
-                    curr = self.weights[i][feat]
-                    self.weights[i][feat] = curr + alpha * (delta / n_sym)
+                self.weights[i][feat] += alpha * (delta / len(group))
 
 ##############################################
-# 以下為輔助函式與 TD-MCTS 的部分 (略)
+# 定義 2048 常用的 n-tuple 模式
 ##############################################
-# 此處略過 TD-MCTS 與 rollout 等函式，請根據需要整合你的程式
+pattern = [
+    [0, 1, 2, 4, 5, 6],
+    [1, 2, 5, 6, 9, 13],
+    [0, 1, 2, 3, 4, 5],
+    [0, 1, 5, 6, 7, 10],
+    [0, 1, 2, 5, 9, 10],
+    [0, 1, 5, 9, 13, 14],
+    [0, 1, 5, 8, 9, 13],
+    [0, 1, 2, 4, 6, 10],
+]
 
 ##############################################
-# 載入預訓練權重並測試 get_action
+# 載入訓練後的權重 (value.pkl)
 ##############################################
-# 以下僅為示範，請確認你的 "value.pkl" 檔案在正確的位置
+# 建立 approximator 的全域變數，供 get_action 使用
+try:
+    with open("value.pkl", "rb") as f:
+        loaded_weights = pickle.load(f)
+    approximator = NTupleApproximator(board_size=4, patterns=pattern, init_value=320000, use_tc=True)
+    approximator.weights = loaded_weights
+    print("Weights loaded successfully from value.pkl.")
+except Exception as e:
+    print("Warning: Unable to load value.pkl, using default initial weights. Error:", e)
+    approximator = NTupleApproximator(board_size=4, patterns=pattern, init_value=320000, use_tc=True)
+
+# 建立環境物件 (用於模擬走步與檢查合法動作)
+env_sim = Game2048Env(size=4)
+
+##############################################
+# 輔助函式：模擬走一步與判斷動作是否合法
+##############################################
+def simulate_move(board, action):
+    return env_sim.simulate_move(board, action)
+
+def is_move_legal(board, action):
+    return env_sim.is_move_legal(board, action)
+
+##############################################
+# 核心函式：get_action(state, score)
+##############################################
+def get_action(state, score):
+    """
+    傳入 state (4x4 ndarray) 與目前分數 (score)，返回一個動作 (0~3)
+    策略：對所有合法動作，模擬走一步並使用 NTupleApproximator 計算估值，
+    選擇估值最高的動作。如果都不合法 (非常罕見)，則隨機選一個動作。
+    """
+    legal_actions = [a for a in range(4) if is_move_legal(state, a)]
+    if not legal_actions:
+        # 若無合法動作，回傳預設動作（例如 0）
+        return 0
+
+    best_action = legal_actions[0]
+    best_value = -float('inf')
+    
+    for action in legal_actions:
+        sim_state = simulate_move(state, action)
+        value_est = approximator.value(sim_state)
+        # 若評估值更好則更新最佳動作
+        if value_est > best_value:
+            best_value = value_est
+            best_action = action
+
+    return best_action
+
+##############################################
+# 測試區塊 (僅供本地測試用，不影響評分系統)
+##############################################
 if __name__ == "__main__":
-    # 測試載入預訓練權重 (value.pkl) 並執行環境測試
-    approxi = NTupleApproximator(board_size=4, patterns=pattern, init_value=320000, use_tc=True)
-    try:
-        with open("value.pkl", "rb") as f:
-            approxi.weights = pickle.load(f)
-        print("Weights loaded successfully.")
-    except Exception as e:
-        print("Error loading weights:", e)
-
-    # 建立環境並進行簡單測試
-    env = Game2048Env()
-    state = env.reset()
-    env.render()
-    print("NTupleApproximator value of initial state:", approxi.value(state))
+    # 建立一個隨機初始棋盤
+    state = np.zeros((4, 4), dtype=int)
+    # 隨機加入兩個 tile (2 或 4)
+    empty_cells = list(zip(*np.where(state == 0)))
+    for _ in range(2):
+        if empty_cells:
+            x, y = random.choice(empty_cells)
+            state[x, y] = 2 if random.random() < 0.9 else 4
+            empty_cells = list(zip(*np.where(state == 0)))
+    score = 0
+    print("Initial board:")
+    print(state)
+    action = get_action(state, score)
+    action_str = ["up", "down", "left", "right"][action]
+    print("Chosen action:", action, action_str)
