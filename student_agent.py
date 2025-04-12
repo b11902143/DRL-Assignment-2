@@ -14,7 +14,8 @@ student_agent.py
 import __main__
 from common import ConstantFactory, NTupleApproximator, Game2048Env
 __main__.ConstantFactory = ConstantFactory
-
+__main__.NTupleApproximator = NTupleApproximator
+__main__.Game2048Env = Game2048Env
 import pickle
 import numpy as np
 import random
