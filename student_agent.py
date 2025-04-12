@@ -23,31 +23,33 @@ class Game2048Env(gym.Env):
         self.action_space = spaces.Discrete(4)
         self.actions = ["up", "down", "left", "right"]
 
+        self.last_move_valid = True  # 記錄上一次移動是否合法
+
         self.reset()
 
     def reset(self):
-        """Reset the environment"""
+        """重置環境"""
         self.board = np.zeros((self.size, self.size), dtype=int)
         self.score = 0
         self.add_random_tile()
         self.add_random_tile()
-        return self.board.copy()
+        return self.board
 
     def add_random_tile(self):
-        """Add a random tile (2 or 4) to an empty cell"""
+        """在空格內隨機加入 tile (2 或 4)"""
         empty_cells = list(zip(*np.where(self.board == 0)))
         if empty_cells:
             x, y = random.choice(empty_cells)
             self.board[x, y] = 2 if random.random() < 0.9 else 4
 
     def compress(self, row):
-        """Compress the row: move non-zero values to the left"""
-        new_row = row[row != 0]  # 移除 0
+        """壓縮一列：將非0數值向左靠"""
+        new_row = row[row != 0]  # 移除0
         new_row = np.pad(new_row, (0, self.size - len(new_row)), mode='constant')
         return new_row
 
     def merge(self, row):
-        """Merge adjacent equal numbers in the row"""
+        """合併相鄰相同的數字"""
         for i in range(len(row) - 1):
             if row[i] == row[i + 1] and row[i] != 0:
                 row[i] *= 2
@@ -56,7 +58,7 @@ class Game2048Env(gym.Env):
         return row
 
     def move_left(self):
-        """Move the board left"""
+        """向左移動棋盤"""
         moved = False
         for i in range(self.size):
             original_row = self.board[i].copy()
@@ -69,7 +71,7 @@ class Game2048Env(gym.Env):
         return moved
 
     def move_right(self):
-        """Move the board right"""
+        """向右移動棋盤"""
         moved = False
         for i in range(self.size):
             original_row = self.board[i].copy()
@@ -83,7 +85,7 @@ class Game2048Env(gym.Env):
         return moved
 
     def move_up(self):
-        """Move the board up"""
+        """向上移動棋盤"""
         moved = False
         for j in range(self.size):
             original_col = self.board[:, j].copy()
@@ -96,7 +98,7 @@ class Game2048Env(gym.Env):
         return moved
 
     def move_down(self):
-        """Move the board down"""
+        """向下移動棋盤"""
         moved = False
         for j in range(self.size):
             original_col = self.board[:, j].copy()
@@ -110,15 +112,15 @@ class Game2048Env(gym.Env):
         return moved
 
     def is_game_over(self):
-        """Check if there are no legal moves left"""
+        """檢查是否無合法移動"""
         if np.any(self.board == 0):
             return False
-        # Check rows
+        # 檢查橫向
         for i in range(self.size):
             for j in range(self.size - 1):
                 if self.board[i, j] == self.board[i, j+1]:
                     return False
-        # Check columns
+        # 檢查縱向
         for j in range(self.size):
             for i in range(self.size - 1):
                 if self.board[i, j] == self.board[i+1, j]:
@@ -126,7 +128,7 @@ class Game2048Env(gym.Env):
         return True
 
     def step(self, action):
-        """Execute one action"""
+        """執行一次動作"""
         assert self.action_space.contains(action), "Invalid action"
         if action == 0:
             moved = self.move_up()
@@ -139,32 +141,73 @@ class Game2048Env(gym.Env):
         else:
             moved = False
 
+        self.last_move_valid = moved
         if moved:
             self.add_random_tile()
         done = self.is_game_over()
-        return self.board.copy(), self.score, done, {}
+        return self.board, self.score, done, {}
 
     def render(self, mode="human", action=None):
-        """Render the current board using Matplotlib."""
+        """使用 Matplotlib 呈現棋盤狀態"""
         fig, ax = plt.subplots(figsize=(4, 4))
         ax.set_xticks([])
         ax.set_yticks([])
         ax.set_xlim(-0.5, self.size - 0.5)
         ax.set_ylim(-0.5, self.size - 0.5)
-        # 可加入自訂顏色設定，如 COLOR_MAP、TEXT_COLOR
         for i in range(self.size):
             for j in range(self.size):
                 value = self.board[i, j]
-                rect = plt.Rectangle((j - 0.5, i - 0.5), 1, 1, facecolor="#ccc0b3", edgecolor="black")
+                color = COLOR_MAP.get(value, "#3c3a32")
+                text_color = TEXT_COLOR.get(value, "white")
+                rect = plt.Rectangle((j - 0.5, i - 0.5), 1, 1, facecolor=color, edgecolor="black")
                 ax.add_patch(rect)
                 if value != 0:
-                    ax.text(j, i, str(value), ha='center', va='center', fontsize=16, fontweight='bold', color="black")
-        title = f"Score: {self.score}"
+                    ax.text(j, i, str(value), ha='center', va='center',
+                            fontsize=16, fontweight='bold', color=text_color)
+        title = f"score: {self.score}"
         if action is not None:
-            title += f" | Action: {self.actions[action]}"
+            title += f" | action: {self.actions[action]}"
         plt.title(title)
         plt.gca().invert_yaxis()
         plt.show()
+
+    def simulate_row_move(self, row):
+        """模擬對單一列執行向左移動"""
+        new_row = row[row != 0]
+        new_row = np.pad(new_row, (0, self.size - len(new_row)), mode='constant')
+        for i in range(len(new_row) - 1):
+            if new_row[i] == new_row[i+1] and new_row[i] != 0:
+                new_row[i] *= 2
+                new_row[i+1] = 0
+        new_row = new_row[new_row != 0]
+        new_row = np.pad(new_row, (0, self.size - len(new_row)), mode='constant')
+        return new_row
+
+    def is_move_legal(self, action):
+        """檢查指定移動是否合法"""
+        temp_board = self.board.copy()
+        if action == 0:
+            for j in range(self.size):
+                col = temp_board[:, j]
+                new_col = self.simulate_row_move(col)
+                temp_board[:, j] = new_col
+        elif action == 1:
+            for j in range(self.size):
+                col = temp_board[:, j][::-1]
+                new_col = self.simulate_row_move(col)
+                temp_board[:, j] = new_col[::-1]
+        elif action == 2:
+            for i in range(self.size):
+                row = temp_board[i]
+                temp_board[i] = self.simulate_row_move(row)
+        elif action == 3:
+            for i in range(self.size):
+                row = temp_board[i][::-1]
+                new_row = self.simulate_row_move(row)
+                temp_board[i] = new_row[::-1]
+        else:
+            raise ValueError("Invalid action")
+        return not np.array_equal(self.board, temp_board)
 
 
 # -------------------------------
@@ -375,11 +418,11 @@ def get_action(state, score):
         env = Game2048Env()
         approximator = NTupleApproximator(board_size=4, patterns=pattern)
         try:
-            with open("value1.pkl", "rb") as f:
+            with open("value.pkl", "rb") as f:
                 approximator.weights = pickle.load(f)
         except Exception as e:
             # 如果無法載入權重，則打印錯誤並回傳隨機動作
-            print("Warning: 無法載入 value1.pkl，將以隨機動作回應。", e)
+            print("Warning: 無法載入 value.pkl，將以隨機動作回應。", e)
             return random.choice(range(4))
     
     # 取得所有合法動作 (使用輔助函數判斷)
