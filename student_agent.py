@@ -1,11 +1,3 @@
-"""
-student_agent.py
-
-此 Agent 利用訓練好的 NTuple Approximator（從 value.pkl 載入權重）
-結合 MCTS 決策，實現 2048 的遊戲策略。
-請確保 value.pkl 檔案存在，且根據你的訓練與模擬邏輯調整超參數。
-"""
-
 import numpy as np
 import pickle
 import random
@@ -15,9 +7,7 @@ import matplotlib.pyplot as plt
 import copy
 import math
 
-# ---------------------------------------------------
-# Environment 定義（和 train.py 中保持一致）
-# ---------------------------------------------------
+### ================= Environment 定義 =================
 COLOR_MAP = {
     0: "#cdc1b4", 2: "#eee4da", 4: "#ede0c8", 8: "#f2b179",
     16: "#f59563", 32: "#f67c5f", 64: "#f65e3b", 128: "#edcf72",
@@ -33,19 +23,15 @@ TEXT_COLOR = {
 class Game2048Env(gym.Env):
     def __init__(self):
         super(Game2048Env, self).__init__()
-        self.size = 4  # 4x4 2048 board
+        self.size = 4  # 4x4 board
         self.board = np.zeros((self.size, self.size), dtype=int)
         self.score = 0
-
-        # Action space: 0: up, 1: down, 2: left, 3: right
         self.action_space = spaces.Discrete(4)
         self.actions = ["up", "down", "left", "right"]
-
-        self.last_move_valid = True  # 記錄上一次動作是否有效
+        self.last_move_valid = True
         self.reset()
 
     def reset(self):
-        """Reset the environment"""
         self.board = np.zeros((self.size, self.size), dtype=int)
         self.score = 0
         self.add_random_tile()
@@ -53,24 +39,21 @@ class Game2048Env(gym.Env):
         return self.board
 
     def add_random_tile(self):
-        """在空格中隨機加入 tile (2 or 4)"""
         empty_cells = list(zip(*np.where(self.board == 0)))
         if empty_cells:
             x, y = random.choice(empty_cells)
             self.board[x, y] = 2 if random.random() < 0.9 else 4
 
     def compress(self, row):
-        """壓縮一行 (將非 0 元素往左移)"""
         new_row = row[row != 0]
         new_row = np.pad(new_row, (0, self.size - len(new_row)), mode='constant')
         return new_row
 
     def merge(self, row):
-        """合併一行中相鄰的相同數字"""
         for i in range(len(row) - 1):
-            if row[i] == row[i + 1] and row[i] != 0:
+            if row[i] == row[i+1] and row[i] != 0:
                 row[i] *= 2
-                row[i + 1] = 0
+                row[i+1] = 0
                 self.score += row[i]
         return row
 
@@ -149,7 +132,6 @@ class Game2048Env(gym.Env):
             moved = self.move_right()
         else:
             moved = False
-
         self.last_move_valid = moved
         if moved:
             self.add_random_tile()
@@ -215,44 +197,7 @@ class Game2048Env(gym.Env):
             raise ValueError("Invalid action")
         return not np.array_equal(self.board, temp_board)
 
-# ---------------------------------------------------
-# 模擬玩家動作後的盤面，不加入隨機 tile (afterstate)
-def simulate_move(board, action, env):
-    env = copy.deepcopy(env)
-    board_copy = board.copy()
-    size = env.size
-    if action == 0:
-        for j in range(size):
-            col = board_copy[:, j]
-            new_col = env.compress(col)
-            new_col = env.merge(new_col)
-            new_col = env.compress(new_col)
-            board_copy[:, j] = new_col
-    elif action == 1:
-        for j in range(size):
-            col = board_copy[:, j][::-1].copy()
-            new_col = env.compress(col)
-            new_col = env.merge(new_col)
-            new_col = env.compress(new_col)
-            board_copy[:, j] = new_col[::-1]
-    elif action == 2:
-        for i in range(size):
-            row = board_copy[i]
-            new_row = env.compress(row)
-            new_row = env.merge(new_row)
-            new_row = env.compress(new_row)
-            board_copy[i] = new_row
-    elif action == 3:
-        for i in range(size):
-            row = board_copy[i][::-1].copy()
-            new_row = env.compress(row)
-            new_row = env.merge(new_row)
-            new_row = env.compress(new_row)
-            board_copy[i] = new_row[::-1]
-    return board_copy
-
-# ---------------------------------------------------
-# NTuple Approximator 定義
+### ================= NTuple Approximator 定義 =================
 class NTupleApproximator:
     def __init__(self, board_size, patterns):
         self.board_size = board_size
@@ -305,7 +250,7 @@ class NTupleApproximator:
         total = 0.0
         num_patterns = len(self.patterns)
         for i in range(num_patterns):
-            sym_group = self.symmetry_patterns[i * self.sym_per_pattern:(i+1)*self.sym_per_pattern]
+            sym_group = self.symmetry_patterns[i*self.sym_per_pattern:(i+1)*self.sym_per_pattern]
             group_val = 0.0
             for pat in sym_group:
                 feature = self.get_feature(board, pat)
@@ -315,7 +260,17 @@ class NTupleApproximator:
             total += group_val
         return total
 
-# 定義 n-tuple 模式 (以 2048 常見模式為例)
+    def update(self, board, delta, alpha):
+        num_patterns = len(self.patterns)
+        for i in range(num_patterns):
+            sym_group = self.symmetry_patterns[i*self.sym_per_pattern:(i+1)*self.sym_per_pattern]
+            for pat in sym_group:
+                feature = self.get_feature(board, pat)
+                if feature not in self.weights[i]:
+                    self.weights[i][feature] = 0.0
+                self.weights[i][feature] += alpha * (delta / len(sym_group))
+
+# 定義 n-tuple 模式 (2048 常見模式)
 TUPLES = [
     [0, 1, 2, 4, 5, 6],
     [1, 2, 5, 6, 9, 13],
@@ -327,14 +282,49 @@ TUPLES = [
     [0, 1, 2, 4, 6, 10],
 ]
 
-# ---------------------------------------------------
-# MCTS 節點定義
+### ================= simulate_move 函式 =================
+def simulate_move(board, action, env):
+    env = copy.deepcopy(env)
+    board_copy = board.copy()
+    size = env.size
+    if action == 0:  # Up
+        for j in range(size):
+            col = board_copy[:, j]
+            new_col = env.compress(col)
+            new_col = env.merge(new_col)
+            new_col = env.compress(new_col)
+            board_copy[:, j] = new_col
+    elif action == 1:  # Down
+        for j in range(size):
+            col = board_copy[:, j][::-1].copy()
+            new_col = env.compress(col)
+            new_col = env.merge(new_col)
+            new_col = env.compress(new_col)
+            board_copy[:, j] = new_col[::-1]
+    elif action == 2:  # Left
+        for i in range(size):
+            row = board_copy[i]
+            new_row = env.compress(row)
+            new_row = env.merge(new_row)
+            new_row = env.compress(new_row)
+            board_copy[i] = new_row
+    elif action == 3:  # Right
+        for i in range(size):
+            row = board_copy[i][::-1].copy()
+            new_row = env.compress(row)
+            new_row = env.merge(new_row)
+            new_row = env.compress(new_row)
+            board_copy[i] = new_row[::-1]
+    return board_copy
+
+### ================= TD-MCTS Node 與 TD-MCTS 定義 =================
 class TD_MCTS_Node:
     def __init__(self, state, score, parent=None, action=None):
         self.state = state
         self.score = score
         self.parent = parent
         self.action = action
+        # children: 若同一玩家動作會產生多個 outcome，儲存為 { action: { (pos, tile): child, ... } }
         self.children = {}
         self.visits = 0
         self.total_reward = 0.0
@@ -343,8 +333,6 @@ class TD_MCTS_Node:
     def fully_expanded(self):
         return len(self.untried_actions) == 0
 
-# ---------------------------------------------------
-# MCTS 定義：結合 TD-trained NTuple Approximator 評估葉節點
 class TD_MCTS:
     def __init__(self, env, approximator, iterations=50, exploration_constant=1.41, rollout_depth=10, gamma=0.99):
         self.env = env
@@ -353,7 +341,7 @@ class TD_MCTS:
         self.c = exploration_constant
         self.rollout_depth = rollout_depth
         self.gamma = gamma
-        
+
     def is_terminal(self, sim_env):
         legal_moves = [a for a in range(4) if sim_env.is_move_legal(a)]
         return len(legal_moves) == 0
@@ -378,10 +366,9 @@ class TD_MCTS:
                 current_child = representative
             else:
                 current_child = child
-
             exploitation = current_child.total_reward / current_child.visits if current_child.visits > 0 else 0
             exploration = self.c * math.sqrt(math.log(node.visits) / current_child.visits) if current_child.visits > 0 else float('inf')
-            exploitation /= 1000  # 可根據需求 scale exploitation
+            exploitation /= 1000  # 若需要可以調整 scale
             uct_value = exploitation + exploration
             if uct_value > best_uct:
                 best_uct = uct_value
@@ -417,13 +404,11 @@ class TD_MCTS:
     def run_simulation(self, root):
         node = root
         sim_env = self.create_env_from_state(node.state, node.score)
-
-        # Selection
+        
         while node.fully_expanded() and not self.is_terminal(sim_env):
             node = self.select_child(node)
             sim_env = self.create_env_from_state(node.state, node.score)
-
-        # Expansion
+        
         if not self.is_terminal(sim_env) and node.untried_actions:
             action = random.choice(node.untried_actions)
             node.untried_actions.remove(action)
@@ -436,17 +421,8 @@ class TD_MCTS:
                         new_state = afterstate.copy()
                         r, c = pos
                         new_state[r, c] = tile_value
-                        # Lazy：檢查是否已有相同 state
-                        existing_node = None
-                        for key, candidate in chance_children.items():
-                            if np.array_equal(candidate.state, new_state):
-                                existing_node = candidate
-                                break
-                        if existing_node is None:
-                            child_node = TD_MCTS_Node(new_state, sim_env.score, parent=node, action=action)
-                            chance_children[(pos, tile_value)] = child_node
-                        else:
-                            chance_children[(pos, tile_value)] = existing_node
+                        child_node = TD_MCTS_Node(new_state, sim_env.score, parent=node, action=action)
+                        chance_children[(pos, tile_value)] = child_node
                 node.children[action] = chance_children
                 if chance_children:
                     chosen_key = random.choice(list(chance_children.keys()))
@@ -462,10 +438,8 @@ class TD_MCTS:
                 node.children[action] = child_node
                 node = child_node
                 sim_env = self.create_env_from_state(node.state, node.score)
-
-        # Rollout
+        
         rollout_reward = self.rollout(sim_env, self.rollout_depth)
-        # Backpropagation
         self.backpropagate(node, rollout_reward)
 
     def best_action_distribution(self, root):
@@ -475,7 +449,6 @@ class TD_MCTS:
                 total_visits += sum(c.visits for c in child.values())
             else:
                 total_visits += child.visits
-
         distribution = np.zeros(4)
         best_visits = -1
         best_action = None
@@ -490,50 +463,38 @@ class TD_MCTS:
                 best_action = action
         return best_action, distribution
 
-# ---------------------------------------------------
-# 載入訓練好的 approximator 權重 (value.pkl)
-# 請確認 value.pkl 檔案路徑正確
-env = Game2048Env()  # 建立環境 (用於初始化 NTuple Approximator 與 MCTS)
+### ================= 載入 value.pkl 的 approximator 權重 =================
+# 全域建立環境與 approximator
+env = Game2048Env()
 approximator = NTupleApproximator(board_size=4, patterns=TUPLES)
 with open("value.pkl", "rb") as f:
     approximator.weights = pickle.load(f)
 print("Loaded approximator weights from value.pkl")
 
-# ---------------------------------------------------
-# get_action(state, score) 為系統呼叫的決策接口
-# state: 當前盤面 (numpy array)
-# score: 當前得分
+### ================= get_action 函式 =================
 def get_action(state, score):
     """
-    依據當前狀態與得分，利用 MCTS 結合 TD-trained NTuple approximaion
-    選出最佳動作並返回 (0: up, 1: down, 2: left, 3: right)
+    輸入: state (numpy array of board), score (int)
+    輸出: action (0~3)
+    
+    本函式根據當前狀態利用 TD-MCTS 搭配已訓練好的 N-Tuple Approximator 進行搜尋，
+    並返回最佳動作。
     """
-    # 建立環境並更新盤面與得分
-    agent_env = Game2048Env()
-    agent_env.board = state.copy()
-    agent_env.score = score
-
-    # 建立 MCTS 根節點
+    # 建立一個環境副本並設置其 board 與 score
+    current_env = copy.deepcopy(env)
+    current_env.board = state.copy()
+    current_env.score = score
+    
+    # 建立 MCTS 樹根
     root = TD_MCTS_Node(state, score)
-
-    # 建立 TD-MCTS，迭代次數可根據速度與效果調整 (這裡設定 50 次模擬)
-    td_mcts = TD_MCTS(agent_env, approximator, iterations=50, exploration_constant=1.41, rollout_depth=10, gamma=0.99)
-
-    # 執行多次模擬以構建 MCTS 樹
+    
+    # 建立 TD-MCTS 搜尋器（可調整 iterations 與 rollout_depth）
+    td_mcts = TD_MCTS(current_env, approximator, iterations=50, exploration_constant=1.41, rollout_depth=10, gamma=0.99)
+    
+    # 執行多次模擬以構建樹
     for _ in range(td_mcts.iterations):
         td_mcts.run_simulation(root)
-
+    
+    # 根據訪問次數選擇最佳動作
     best_act, dist = td_mcts.best_action_distribution(root)
-    # 可選擇印出分布 (供除錯用)
-    # print("MCTS action distribution:", dist)
     return best_act
-
-# 如果直接執行此檔案，則進行簡單測試 (例如，隨機初始化一個盤面並選動作)
-if __name__ == "__main__":
-    test_env = Game2048Env()
-    state = test_env.reset()
-    score = test_env.score
-    action = get_action(state, score)
-    print("Selected action:", action)
-    test_env.step(action)
-    test_env.render(action=action)
