@@ -3,10 +3,9 @@ student_agent.py
 
 此 Agent 利用訓練好的 NTuple Approximator（從 value.pkl 載入權重）
 結合 MCTS 決策，實現 2048 的遊戲策略。
-請確保 value.pkl 檔案能正確從 Google Drive 下載，並根據你的需求調整超參數。
+請確保 value.pkl 檔案存在，且根據你的訓練與模擬邏輯調整超參數。
 """
 
-import os
 import numpy as np
 import pickle
 import random
@@ -16,20 +15,9 @@ import matplotlib.pyplot as plt
 import copy
 import math
 
-# 如果 value.pkl 不存在，利用 gdown 下載 (請先確保 gdown 已安裝: pip install gdown)
-
-try:
-    import gdown
-    # 請將下面 URL 替換成你 Google Drive 上的分享連結，例如：
-    # url = "https://drive.google.com/uc?id=你的檔案ID&export=download"
-    url = "https://drive.google.com/uc?id=YOUR_FILE_ID&export=download"
-    print("value.pkl 不存在，開始下載...")
-    gdown.download(url, "value.pkl", quiet=False)
-except ImportError:
-    raise ImportError("請先安裝 gdown，執行命令 pip install gdown")
-
 # ---------------------------------------------------
-# Environment 定義（與 train.py 保持一致）
+# Environment 定義（和 train.py 中保持一致）
+# ---------------------------------------------------
 COLOR_MAP = {
     0: "#cdc1b4", 2: "#eee4da", 4: "#ede0c8", 8: "#f2b179",
     16: "#f59563", 32: "#f67c5f", 64: "#f65e3b", 128: "#edcf72",
@@ -53,10 +41,11 @@ class Game2048Env(gym.Env):
         self.action_space = spaces.Discrete(4)
         self.actions = ["up", "down", "left", "right"]
 
-        self.last_move_valid = True
+        self.last_move_valid = True  # 記錄上一次動作是否有效
         self.reset()
 
     def reset(self):
+        """Reset the environment"""
         self.board = np.zeros((self.size, self.size), dtype=int)
         self.score = 0
         self.add_random_tile()
@@ -64,17 +53,20 @@ class Game2048Env(gym.Env):
         return self.board
 
     def add_random_tile(self):
+        """在空格中隨機加入 tile (2 or 4)"""
         empty_cells = list(zip(*np.where(self.board == 0)))
         if empty_cells:
             x, y = random.choice(empty_cells)
             self.board[x, y] = 2 if random.random() < 0.9 else 4
 
     def compress(self, row):
+        """壓縮一行 (將非 0 元素往左移)"""
         new_row = row[row != 0]
         new_row = np.pad(new_row, (0, self.size - len(new_row)), mode='constant')
         return new_row
 
     def merge(self, row):
+        """合併一行中相鄰的相同數字"""
         for i in range(len(row) - 1):
             if row[i] == row[i + 1] and row[i] != 0:
                 row[i] *= 2
@@ -224,7 +216,7 @@ class Game2048Env(gym.Env):
         return not np.array_equal(self.board, temp_board)
 
 # ---------------------------------------------------
-# 模擬玩家動作後的盤面（afterstate），不加入隨機 tile
+# 模擬玩家動作後的盤面，不加入隨機 tile (afterstate)
 def simulate_move(board, action, env):
     env = copy.deepcopy(env)
     board_copy = board.copy()
@@ -389,7 +381,7 @@ class TD_MCTS:
 
             exploitation = current_child.total_reward / current_child.visits if current_child.visits > 0 else 0
             exploration = self.c * math.sqrt(math.log(node.visits) / current_child.visits) if current_child.visits > 0 else float('inf')
-            exploitation /= 1000
+            exploitation /= 1000  # 可根據需求 scale exploitation
             uct_value = exploitation + exploration
             if uct_value > best_uct:
                 best_uct = uct_value
@@ -444,6 +436,7 @@ class TD_MCTS:
                         new_state = afterstate.copy()
                         r, c = pos
                         new_state[r, c] = tile_value
+                        # Lazy：檢查是否已有相同 state
                         existing_node = None
                         for key, candidate in chance_children.items():
                             if np.array_equal(candidate.state, new_state):
@@ -472,6 +465,7 @@ class TD_MCTS:
 
         # Rollout
         rollout_reward = self.rollout(sim_env, self.rollout_depth)
+        # Backpropagation
         self.backpropagate(node, rollout_reward)
 
     def best_action_distribution(self, root):
@@ -498,32 +492,43 @@ class TD_MCTS:
 
 # ---------------------------------------------------
 # 載入訓練好的 approximator 權重 (value.pkl)
-env = Game2048Env()  
+# 請確認 value.pkl 檔案路徑正確
+env = Game2048Env()  # 建立環境 (用於初始化 NTuple Approximator 與 MCTS)
 approximator = NTupleApproximator(board_size=4, patterns=TUPLES)
 with open("value.pkl", "rb") as f:
     approximator.weights = pickle.load(f)
 print("Loaded approximator weights from value.pkl")
 
 # ---------------------------------------------------
-# get_action(state, score) 為評測系統呼叫的決策接口
+# get_action(state, score) 為系統呼叫的決策接口
+# state: 當前盤面 (numpy array)
+# score: 當前得分
 def get_action(state, score):
     """
-    根據傳入的 state 與 score，利用 MCTS (結合 TD-trained NTuple Approximator)
+    依據當前狀態與得分，利用 MCTS 結合 TD-trained NTuple approximaion
     選出最佳動作並返回 (0: up, 1: down, 2: left, 3: right)
     """
+    # 建立環境並更新盤面與得分
     agent_env = Game2048Env()
     agent_env.board = state.copy()
     agent_env.score = score
 
+    # 建立 MCTS 根節點
     root = TD_MCTS_Node(state, score)
+
+    # 建立 TD-MCTS，迭代次數可根據速度與效果調整 (這裡設定 50 次模擬)
     td_mcts = TD_MCTS(agent_env, approximator, iterations=50, exploration_constant=1.41, rollout_depth=10, gamma=0.99)
 
+    # 執行多次模擬以構建 MCTS 樹
     for _ in range(td_mcts.iterations):
         td_mcts.run_simulation(root)
 
     best_act, dist = td_mcts.best_action_distribution(root)
+    # 可選擇印出分布 (供除錯用)
+    # print("MCTS action distribution:", dist)
     return best_act
 
+# 如果直接執行此檔案，則進行簡單測試 (例如，隨機初始化一個盤面並選動作)
 if __name__ == "__main__":
     test_env = Game2048Env()
     state = test_env.reset()
