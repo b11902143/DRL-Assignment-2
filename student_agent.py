@@ -17,16 +17,16 @@ import copy
 import math
 
 # 如果 value.pkl 不存在，利用 gdown 下載 (請先確保 gdown 已安裝: pip install gdown)
-if not os.path.exists("value.pkl"):
-    try:
-        import gdown
-        # 請將下面 URL 替換成你 Google Drive 上的分享連結，例如：
-        # url = "https://drive.google.com/uc?id=你的檔案ID&export=download"
-        url = "https://drive.google.com/uc?id=YOUR_FILE_ID&export=download"
-        print("value.pkl 不存在，開始下載...")
-        gdown.download(url, "value.pkl", quiet=False)
-    except ImportError:
-        raise ImportError("請先安裝 gdown，執行命令 pip install gdown")
+
+try:
+    import gdown
+    # 請將下面 URL 替換成你 Google Drive 上的分享連結，例如：
+    # url = "https://drive.google.com/uc?id=你的檔案ID&export=download"
+    url = "https://drive.google.com/uc?id=YOUR_FILE_ID&export=download"
+    print("value.pkl 不存在，開始下載...")
+    gdown.download(url, "value.pkl", quiet=False)
+except ImportError:
+    raise ImportError("請先安裝 gdown，執行命令 pip install gdown")
 
 # ---------------------------------------------------
 # Environment 定義（與 train.py 保持一致）
