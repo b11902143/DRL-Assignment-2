@@ -1,12 +1,3 @@
-name: Python Application Test
-
-on:
-  workflow_dispatch:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -28,14 +19,14 @@ jobs:
         pip install gym
         pip install -r requirements.txt
 
-    - name: Install gdown
-      run: pip install gdown
+    - name: 3. Download value.pkl from Google Drive
+      run: |
+        pip install gdown
+        # 請將 YOUR_FILE_ID 替換成你的檔案 ID
+        gdown --fuzzy 'https://drive.google.com/file/d/YOUR_FILE_ID/view?usp=sharing'
 
-    - name: Download value.pkl from Google Drive
-      run: gdown --fuzzy 'https://drive.google.com/file/d/1EKmpmPFlbbicOuXRm2v_mRKpuY51rXz_/view?usp=drive_link'
-
-    - name: 3. Ensure env.so is executable
+    - name: 4. Ensure env.so is executable
       run: chmod +x env.cpython-38-x86_64-linux-gnu.so
 
-    - name: 4. Run Evaluation
+    - name: 5. Run Evaluation
       run: python eval.py --token a91aae52cff9ef65932db06b150ffd47
