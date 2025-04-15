@@ -488,33 +488,23 @@ class TD_MCTS:
 
 # ----------------- Agent 決策函式 -----------------
 def get_action(state, score):
-    # 依據傳入 state 與 score 建立環境副本
+    # 根據傳入 state 與 score 建立新的環境實例
     env = Game2048Env()
     env.board = state.copy()
     env.score = score
 
-    # 確保 approximator 已經初始化並載入訓練好的權重
-    global approximator
+    global approximator, mcts
     try:
         approximator
     except NameError:
         approximator = NTupleApproximator(board_size=4, patterns=TUPLES)
-        load_weights(approximator, "value.pkl")
-    
-    # 取得所有合法動作
-    legal_moves = [a for a in range(4) if env.is_move_legal(a)]
-    if not legal_moves:
-        # 若無合法動作，隨機回傳一個動作
-        return random.choice(range(4))
-    
-    # 對每個合法動作進行模擬並評估，選出評估值最高的動作
-    best_action = None
-    best_value = -float('inf')
-    for a in legal_moves:
-        simulated_state = simulate_move(state, a, env)  # 模擬 action a 後的棋盤狀態
-        value_est = approximator.value(simulated_state)  # 使用 approximator 評估模擬狀態價值
-        if value_est > best_value:
-            best_value = value_est
-            best_action = a
-    
-    return best_action
+        load_weights(approximator, VALUE_PKL)
+    mcts = TD_MCTS(env, approximator, iterations=100, exploration_constant=1.41, rollout_depth=0, gamma=0.99)
+    root = TD_MCTS_Node(env.board.copy(), env.score, env)
+    for _ in range(mcts.iterations):
+        mcts.run_simulation(root)
+    best_act, _ = mcts.best_action_distribution(root)
+    if best_act is None:
+        legal = [a for a in range(4) if env.is_move_legal(a)]
+        best_act = random.choice(legal) if legal else random.choice(range(4))
+    return best_act
