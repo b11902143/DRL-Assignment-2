@@ -34,8 +34,8 @@ TEXT_COLOR = {
     2: "#776e65", 4: "#776e65", 8: "#f9f6f2", 16: "#f9f6f2",
     32: "#f9f6f2", 64: "#f9f6f2", 128: "#f9f6f2", 256: "#f9f6f2",
     512: "#f9f6f2", 1024: "#f9f6f2", 2048: "#f9f6f2", 4096: "#f9f6f2"
-}
 
+}
 class Game2048Env(gym.Env):
     def __init__(self):
         super(Game2048Env, self).__init__()
@@ -497,7 +497,7 @@ def get_action(state, score):
     
     approximator = NTupleApproximator(board_size=4, patterns=TUPLES)
     load_weights(approximator, VALUE_PKL)
-    mcts = TD_MCTS(env, approximator, iterations=100, exploration_constant=1.41, rollout_depth=10, gamma=0.99)
+    mcts = TD_MCTS(env, approximator, iterations=100, exploration_constant=1.41, rollout_depth=0, gamma=0.99)
     root = TD_MCTS_Node(env.board.copy(), env.score, env)
     for _ in range(mcts.iterations):
         mcts.run_simulation(root)
@@ -506,24 +506,3 @@ def get_action(state, score):
         legal = [a for a in range(4) if env.is_move_legal(a)]
         best_act = random.choice(legal) if legal else random.choice(range(4))
     return best_act
-
-# ----------------- __main__ 測試區 (選做) -----------------
-if __name__ == "__main__":
-    env = Game2048Env()
-    approximator = NTupleApproximator(board_size=4, patterns=TUPLES)
-    load_weights(approximator, VALUE_PKL)
-    mcts = TD_MCTS(env, approximator, iterations=100, exploration_constant=1.41, rollout_depth=0, gamma=0.99)
-
-    state = env.reset()
-    env.render()
-
-    done = False
-    while not done:
-        root = TD_MCTS_Node(state, env.score, env)
-        for _ in range(mcts.iterations):
-            mcts.run_simulation(root)
-        action = mcts.best_action_distribution(root)[0]
-        print("Selected action:", action)
-        state, reward, done, _ = env.step(action)
-        env.render(action=action)
-    print("Game over, final score:", env.score)
