@@ -16,7 +16,7 @@ except ImportError:
 
 VALUE_PKL = "value.pkl"
 if not os.path.exists(VALUE_PKL):
-    # Google Drive 連結: https://drive.google.com/file/d/1t9i3fp1DKTsrUuaYAAu7Swrv6NovqIsZ/view?usp=sharing
+    # Google Drive 連結: https://drive.google.com/file/d/1t9i3fp1DKTsrUuaYAAu7Swrv6NovqIsZ/view?usp=drive_link
     # 轉換成下載連結：https://drive.google.com/uc?id=1t9i3fp1DKTsrUuaYAAu7Swrv6NovqIsZ
     file_id = "1t9i3fp1DKTsrUuaYAAu7Swrv6NovqIsZ"
     url = f"https://drive.google.com/uc?id={file_id}"
@@ -39,17 +39,20 @@ TEXT_COLOR = {
 class Game2048Env(gym.Env):
     def __init__(self):
         super(Game2048Env, self).__init__()
-        self.size = 4  # 4x4 board
+        self.size = 4  # 4x4 2048 board
         self.board = np.zeros((self.size, self.size), dtype=int)
         self.score = 0
 
+        # Action space: 0: up, 1: down, 2: left, 3: right
         self.action_space = spaces.Discrete(4)
         self.actions = ["up", "down", "left", "right"]
 
-        self.last_move_valid = True
+        self.last_move_valid = True  # Record if last move was valid
+
         self.reset()
 
     def reset(self):
+        """Reset the environment"""
         self.board = np.zeros((self.size, self.size), dtype=int)
         self.score = 0
         self.add_random_tile()
@@ -57,17 +60,20 @@ class Game2048Env(gym.Env):
         return self.board
 
     def add_random_tile(self):
+        """Add a random tile (2 or 4) to an empty cell"""
         empty_cells = list(zip(*np.where(self.board == 0)))
         if empty_cells:
             x, y = random.choice(empty_cells)
             self.board[x, y] = 2 if random.random() < 0.9 else 4
 
     def compress(self, row):
-        new_row = row[row != 0]
+        """Compress the row: move non-zero values to the left"""
+        new_row = row[row != 0]  # Remove zeros
         new_row = np.pad(new_row, (0, self.size - len(new_row)), mode='constant')
         return new_row
 
     def merge(self, row):
+        """Merge adjacent equal numbers in the row"""
         for i in range(len(row) - 1):
             if row[i] == row[i + 1] and row[i] != 0:
                 row[i] *= 2
@@ -76,6 +82,7 @@ class Game2048Env(gym.Env):
         return row
 
     def move_left(self):
+        """Move the board left"""
         moved = False
         for i in range(self.size):
             original_row = self.board[i].copy()
@@ -88,6 +95,7 @@ class Game2048Env(gym.Env):
         return moved
 
     def move_right(self):
+        """Move the board right"""
         moved = False
         for i in range(self.size):
             original_row = self.board[i].copy()
@@ -101,6 +109,7 @@ class Game2048Env(gym.Env):
         return moved
 
     def move_up(self):
+        """Move the board up"""
         moved = False
         for j in range(self.size):
             original_col = self.board[:, j].copy()
@@ -113,6 +122,7 @@ class Game2048Env(gym.Env):
         return moved
 
     def move_down(self):
+        """Move the board down"""
         moved = False
         for j in range(self.size):
             original_col = self.board[:, j].copy()
@@ -126,6 +136,7 @@ class Game2048Env(gym.Env):
         return moved
 
     def is_game_over(self):
+        """Check if there are no legal moves left"""
         if np.any(self.board == 0):
             return False
         for i in range(self.size):
@@ -139,6 +150,7 @@ class Game2048Env(gym.Env):
         return True
 
     def step(self, action):
+        """Execute one action"""
         assert self.action_space.contains(action), "Invalid action"
         if action == 0:
             moved = self.move_up()
@@ -150,6 +162,7 @@ class Game2048Env(gym.Env):
             moved = self.move_right()
         else:
             moved = False
+
         self.last_move_valid = moved
         if moved:
             self.add_random_tile()
@@ -157,6 +170,7 @@ class Game2048Env(gym.Env):
         return self.board, self.score, done, {}
 
     def render(self, mode="human", action=None):
+        """Render the current board using Matplotlib."""
         fig, ax = plt.subplots(figsize=(4, 4))
         ax.set_xticks([])
         ax.set_yticks([])
@@ -180,6 +194,7 @@ class Game2048Env(gym.Env):
         plt.show()
 
     def simulate_row_move(self, row):
+        """Simulate a left move for a single row"""
         new_row = row[row != 0]
         new_row = np.pad(new_row, (0, self.size - len(new_row)), mode='constant')
         for i in range(len(new_row) - 1):
@@ -191,6 +206,7 @@ class Game2048Env(gym.Env):
         return new_row
 
     def is_move_legal(self, action):
+        """Check if the specified move is legal."""
         temp_board = self.board.copy()
         if action == 0:
             for j in range(self.size):
@@ -214,31 +230,33 @@ class Game2048Env(gym.Env):
         else:
             raise ValueError("Invalid action")
         return not np.array_equal(self.board, temp_board)
-
 # ----------------- NTuple Approximator 定義 -----------------
 class NTupleApproximator:
     def __init__(self, board_size, patterns):
         self.board_size = board_size
         self.patterns = patterns
+        # 為每個模式建立一個權重字典
         self.weights = [dict() for _ in patterns]
+        # 為每組模式產生 8 個對稱變換結果，依序儲存在 symmetry_patterns 中
         self.symmetry_patterns = []
         for pattern in self.patterns:
             syms = self.generate_symmetries(pattern)
             for sym in syms:
                 self.symmetry_patterns.append(sym)
+        # 假設每組模式產生 8 個對稱結果
         self.sym_per_pattern = 8 if len(self.patterns) > 0 else 0
 
     def generate_symmetries(self, pattern):
         board_size = self.board_size
         transform_funcs = [
-            lambda coord: coord,
-            lambda coord: (coord[1], board_size - 1 - coord[0]),
-            lambda coord: (board_size - 1 - coord[0], board_size - 1 - coord[1]),
-            lambda coord: (board_size - 1 - coord[1], coord[0]),
-            lambda coord: (coord[0], board_size - 1 - coord[1]),
-            lambda coord: (board_size - 1 - coord[0], coord[1]),
-            lambda coord: (coord[1], coord[0]),
-            lambda coord: (board_size - 1 - coord[1], board_size - 1 - coord[0])
+            lambda coord: coord,  # identity
+            lambda coord: (coord[1], board_size - 1 - coord[0]),      # 90° rotation
+            lambda coord: (board_size - 1 - coord[0], board_size - 1 - coord[1]),  # 180° rotation
+            lambda coord: (board_size - 1 - coord[1], coord[0]),      # 270° rotation
+            lambda coord: (coord[0], board_size - 1 - coord[1]),      # horizontal reflection
+            lambda coord: (board_size - 1 - coord[0], coord[1]),      # vertical reflection
+            lambda coord: (coord[1], coord[0]),                       # main diagonal reflection
+            lambda coord: (board_size - 1 - coord[1], board_size - 1 - coord[0])  # anti-diagonal reflection
         ]
         sym_patterns = []
         for tf in transform_funcs:
@@ -252,24 +270,41 @@ class NTupleApproximator:
         return sym_patterns
 
     def tile_to_index(self, tile):
-        return 0 if tile == 0 else int(math.log(tile, 2))
+        if tile == 0:
+            return 0
+        else:
+            return int(math.log(tile, 2))
 
     def get_feature(self, board, coords):
-        flat = board.flatten() if isinstance(board, np.ndarray) and board.ndim > 1 else board
+        if isinstance(board, np.ndarray) and board.ndim > 1:
+            flat = board.flatten()
+        else:
+            flat = board
         return tuple(self.tile_to_index(flat[i]) for i in coords)
 
     def value(self, board):
         total = 0.0
         num_patterns = len(self.patterns)
         for i in range(num_patterns):
-            sym_group = self.symmetry_patterns[i * self.sym_per_pattern:(i + 1) * self.sym_per_pattern]
+            sym_group = self.symmetry_patterns[i * self.sym_per_pattern:(i+1)*self.sym_per_pattern]
             group_val = 0.0
             for pat in sym_group:
                 feature = self.get_feature(board, pat)
-                group_val += self.weights[i].get(feature, 0.0)
+                w = self.weights[i].get(feature, 0.0)
+                group_val += w
             group_val /= len(sym_group)
             total += group_val
         return total
+
+    def update(self, board, delta, alpha):
+        num_patterns = len(self.patterns)
+        for i in range(num_patterns):
+            sym_group = self.symmetry_patterns[i * self.sym_per_pattern:(i+1)*self.sym_per_pattern]
+            for pat in sym_group:
+                feature = self.get_feature(board, pat)
+                if feature not in self.weights[i]:
+                    self.weights[i][feature] = 0.0
+                self.weights[i][feature] += alpha * (delta / len(sym_group))
 
 # 定義固定的 n-tuple 模式 (與訓練時設定相同)
 TUPLES = [
@@ -283,38 +318,39 @@ TUPLES = [
     [0, 1, 2, 4, 6, 10],
 ]
 
-# ----------------- 輔助函式 -----------------
+# ================= simulate_move 函式 =================
 def simulate_move(board, action, env):
-    env_copy = copy.deepcopy(env)
+    """Simulate the board state after an action (without adding a random tile)."""
+    env = copy.deepcopy(env)
     board_copy = board.copy()
-    size = env_copy.size
-    if action == 0:
+    size = env.size
+    if action == 0:  # Up
         for j in range(size):
             col = board_copy[:, j]
-            new_col = env_copy.compress(col)
-            new_col = env_copy.merge(new_col)
-            new_col = env_copy.compress(new_col)
+            new_col = env.compress(col)
+            new_col = env.merge(new_col)
+            new_col = env.compress(new_col)
             board_copy[:, j] = new_col
-    elif action == 1:
+    elif action == 1:  # Down
         for j in range(size):
             col = board_copy[:, j][::-1].copy()
-            new_col = env_copy.compress(col)
-            new_col = env_copy.merge(new_col)
-            new_col = env_copy.compress(new_col)
+            new_col = env.compress(col)
+            new_col = env.merge(new_col)
+            new_col = env.compress(new_col)
             board_copy[:, j] = new_col[::-1]
-    elif action == 2:
+    elif action == 2:  # Left
         for i in range(size):
             row = board_copy[i]
-            new_row = env_copy.compress(row)
-            new_row = env_copy.merge(new_row)
-            new_row = env_copy.compress(new_row)
+            new_row = env.compress(row)
+            new_row = env.merge(new_row)
+            new_row = env.compress(new_row)
             board_copy[i] = new_row
-    elif action == 3:
+    elif action == 3:  # Right
         for i in range(size):
             row = board_copy[i][::-1].copy()
-            new_row = env_copy.compress(row)
-            new_row = env_copy.merge(new_row)
-            new_row = env_copy.compress(new_row)
+            new_row = env.compress(row)
+            new_row = env.merge(new_row)
+            new_row = env.compress(new_row)
             board_copy[i] = new_row[::-1]
     return board_copy
 
@@ -327,6 +363,13 @@ def load_weights(approximator, filepath):
 # ----------------- TD-MCTS 節點與 TD-MCTS 定義 -----------------
 class TD_MCTS_Node:
     def __init__(self, state, score, env, parent=None, action=None):
+        """
+        state: 當前棋盤狀態 (numpy array)
+        score: 當前得分
+        env: 遊戲環境 (用來判斷該狀態下哪些動作合法)
+        parent: 父節點 (None 代表 root)
+        action: 從父節點到本節點所採的動作
+        """
         self.state = state
         self.score = score
         self.parent = parent
@@ -339,8 +382,9 @@ class TD_MCTS_Node:
     def fully_expanded(self):
         return len(self.untried_actions) == 0
 
+# ---------------- TD-MCTS 類別 ----------------
 class TD_MCTS:
-    def __init__(self, env, approximator, iterations=100, exploration_constant=1.41, rollout_depth=10, gamma=0.99):
+    def __init__(self, env, approximator, iterations=100, exploration_constant=1.41, rollout_depth=0, gamma=0.99):
         self.env = env
         self.approximator = approximator
         self.iterations = iterations
@@ -365,9 +409,9 @@ class TD_MCTS:
             Q_raw = child.total_reward / child.visits
             Q_norm = (Q_raw - Q_min) / span
             U = self.c * math.sqrt(math.log(node.visits) / child.visits)
-            score_val = Q_norm + U
-            if score_val > best_score:
-                best_score = score_val
+            score = Q_norm + U
+            if score > best_score:
+                best_score = score
                 best_child = child
         return best_child
 
@@ -376,7 +420,7 @@ class TD_MCTS:
         total_reward = 0.0
         discount = 1.0
         prev_score = 0
-
+        
         for _ in range(depth):
             legal = [a for a in range(4) if sim_env.is_move_legal(a)]
             if not legal:
@@ -390,6 +434,7 @@ class TD_MCTS:
             if done:
                 break
 
+        # 採用 one‑step lookahead 以 approximator 評估
         leaf_legal = [a for a in range(4) if sim_env.is_move_legal(a)]
         if leaf_legal:
             best_leaf = -float('inf')
@@ -410,18 +455,18 @@ class TD_MCTS:
     def run_simulation(self, root):
         node = root
         sim_env = self.create_env_from_state(node.state, node.score)
-        # Selection
+        # 選擇階段
         while node.fully_expanded() and node.children:
             node = self.select_child(node)
             sim_env.board = simulate_move(sim_env.board, node.action, sim_env)
             sim_env.add_random_tile()
 
-        # Expansion
+        # 展開階段
         if node.untried_actions:
             a = random.choice(node.untried_actions)
             sim_env.board = simulate_move(sim_env.board, a, sim_env)
             sim_env.add_random_tile()
-            child = TD_MCTS_Node(sim_env.board.copy(), sim_env.score, self.env, parent=node, action=a)
+            child = TD_MCTS_Node(state=sim_env.board.copy(), score=sim_env.score, env=self.env, parent=node, action=a)
             node.children[a] = child
             node.untried_actions.remove(a)
             node = child
@@ -469,7 +514,7 @@ if __name__ == "__main__":
     env = Game2048Env()
     approximator = NTupleApproximator(board_size=4, patterns=TUPLES)
     load_weights(approximator, VALUE_PKL)
-    mcts = TD_MCTS(env, approximator, iterations=100, exploration_constant=1.41, rollout_depth=10, gamma=0.99)
+    mcts = TD_MCTS(env, approximator, iterations=100, exploration_constant=1.41, rollout_depth=0, gamma=0.99)
 
     state = env.reset()
     env.render()
