@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import pickle
 import random
@@ -7,7 +8,22 @@ import matplotlib.pyplot as plt
 import copy
 import math
 
-### ================= Environment 定義 =================
+# ----------------- 利用 gdown 從 Google Drive 下載 value.pkl -----------------
+try:
+    import gdown
+except ImportError:
+    raise ImportError("請先使用 pip install gdown 安裝 gdown 模組")
+
+VALUE_PKL = "value.pkl"
+if not os.path.exists(VALUE_PKL):
+    # Google Drive 連結: https://drive.google.com/file/d/1t9i3fp1DKTsrUuaYAAu7Swrv6NovqIsZ/view?usp=sharing
+    # 轉換成下載連結：https://drive.google.com/uc?id=1t9i3fp1DKTsrUuaYAAu7Swrv6NovqIsZ
+    file_id = "1t9i3fp1DKTsrUuaYAAu7Swrv6NovqIsZ"
+    url = f"https://drive.google.com/uc?id={file_id}"
+    print("Downloading value.pkl from Google Drive ...")
+    gdown.download(url, VALUE_PKL, quiet=False)
+
+# ----------------- Environment 定義 -----------------
 COLOR_MAP = {
     0: "#cdc1b4", 2: "#eee4da", 4: "#ede0c8", 8: "#f2b179",
     16: "#f59563", 32: "#f67c5f", 64: "#f65e3b", 128: "#edcf72",
@@ -26,8 +42,10 @@ class Game2048Env(gym.Env):
         self.size = 4  # 4x4 board
         self.board = np.zeros((self.size, self.size), dtype=int)
         self.score = 0
+
         self.action_space = spaces.Discrete(4)
         self.actions = ["up", "down", "left", "right"]
+
         self.last_move_valid = True
         self.reset()
 
@@ -51,9 +69,9 @@ class Game2048Env(gym.Env):
 
     def merge(self, row):
         for i in range(len(row) - 1):
-            if row[i] == row[i+1] and row[i] != 0:
+            if row[i] == row[i + 1] and row[i] != 0:
                 row[i] *= 2
-                row[i+1] = 0
+                row[i + 1] = 0
                 self.score += row[i]
         return row
 
@@ -197,7 +215,7 @@ class Game2048Env(gym.Env):
             raise ValueError("Invalid action")
         return not np.array_equal(self.board, temp_board)
 
-### ================= NTuple Approximator 定義 =================
+# ----------------- NTuple Approximator 定義 -----------------
 class NTupleApproximator:
     def __init__(self, board_size, patterns):
         self.board_size = board_size
@@ -234,43 +252,26 @@ class NTupleApproximator:
         return sym_patterns
 
     def tile_to_index(self, tile):
-        if tile == 0:
-            return 0
-        else:
-            return int(math.log(tile, 2))
+        return 0 if tile == 0 else int(math.log(tile, 2))
 
     def get_feature(self, board, coords):
-        if isinstance(board, np.ndarray) and board.ndim > 1:
-            flat = board.flatten()
-        else:
-            flat = board
+        flat = board.flatten() if isinstance(board, np.ndarray) and board.ndim > 1 else board
         return tuple(self.tile_to_index(flat[i]) for i in coords)
 
     def value(self, board):
         total = 0.0
         num_patterns = len(self.patterns)
         for i in range(num_patterns):
-            sym_group = self.symmetry_patterns[i*self.sym_per_pattern:(i+1)*self.sym_per_pattern]
+            sym_group = self.symmetry_patterns[i * self.sym_per_pattern:(i + 1) * self.sym_per_pattern]
             group_val = 0.0
             for pat in sym_group:
                 feature = self.get_feature(board, pat)
-                w = self.weights[i].get(feature, 0.0)
-                group_val += w
+                group_val += self.weights[i].get(feature, 0.0)
             group_val /= len(sym_group)
             total += group_val
         return total
 
-    def update(self, board, delta, alpha):
-        num_patterns = len(self.patterns)
-        for i in range(num_patterns):
-            sym_group = self.symmetry_patterns[i*self.sym_per_pattern:(i+1)*self.sym_per_pattern]
-            for pat in sym_group:
-                feature = self.get_feature(board, pat)
-                if feature not in self.weights[i]:
-                    self.weights[i][feature] = 0.0
-                self.weights[i][feature] += alpha * (delta / len(sym_group))
-
-# 定義 n-tuple 模式 (2048 常見模式)
+# 定義固定的 n-tuple 模式 (與訓練時設定相同)
 TUPLES = [
     [0, 1, 2, 4, 5, 6],
     [1, 2, 5, 6, 9, 13],
@@ -282,49 +283,54 @@ TUPLES = [
     [0, 1, 2, 4, 6, 10],
 ]
 
-### ================= simulate_move 函式 =================
+# ----------------- 輔助函式 -----------------
 def simulate_move(board, action, env):
-    env = copy.deepcopy(env)
+    env_copy = copy.deepcopy(env)
     board_copy = board.copy()
-    size = env.size
-    if action == 0:  # Up
+    size = env_copy.size
+    if action == 0:
         for j in range(size):
             col = board_copy[:, j]
-            new_col = env.compress(col)
-            new_col = env.merge(new_col)
-            new_col = env.compress(new_col)
+            new_col = env_copy.compress(col)
+            new_col = env_copy.merge(new_col)
+            new_col = env_copy.compress(new_col)
             board_copy[:, j] = new_col
-    elif action == 1:  # Down
+    elif action == 1:
         for j in range(size):
             col = board_copy[:, j][::-1].copy()
-            new_col = env.compress(col)
-            new_col = env.merge(new_col)
-            new_col = env.compress(new_col)
+            new_col = env_copy.compress(col)
+            new_col = env_copy.merge(new_col)
+            new_col = env_copy.compress(new_col)
             board_copy[:, j] = new_col[::-1]
-    elif action == 2:  # Left
+    elif action == 2:
         for i in range(size):
             row = board_copy[i]
-            new_row = env.compress(row)
-            new_row = env.merge(new_row)
-            new_row = env.compress(new_row)
+            new_row = env_copy.compress(row)
+            new_row = env_copy.merge(new_row)
+            new_row = env_copy.compress(new_row)
             board_copy[i] = new_row
-    elif action == 3:  # Right
+    elif action == 3:
         for i in range(size):
             row = board_copy[i][::-1].copy()
-            new_row = env.compress(row)
-            new_row = env.merge(new_row)
-            new_row = env.compress(new_row)
+            new_row = env_copy.compress(row)
+            new_row = env_copy.merge(new_row)
+            new_row = env_copy.compress(new_row)
             board_copy[i] = new_row[::-1]
     return board_copy
 
-### ================= TD-MCTS Node 與 TD-MCTS 定義 =================
+def load_weights(approximator, filepath):
+    with open(filepath, "rb") as f:
+        approximator.weights = pickle.load(f)
+    print(f"Weights loaded from: {filepath}")
+    return approximator.weights
+
+# ----------------- TD-MCTS 節點與 TD-MCTS 定義 -----------------
 class TD_MCTS_Node:
-    def __init__(self, state, score, parent=None, action=None):
+    def __init__(self, state, score, env, parent=None, action=None):
         self.state = state
         self.score = score
         self.parent = parent
         self.action = action
-        # children: 若同一玩家動作會產生多個 outcome，儲存為 { action: { (pos, tile): child, ... } }
         self.children = {}
         self.visits = 0
         self.total_reward = 0.0
@@ -334,17 +340,13 @@ class TD_MCTS_Node:
         return len(self.untried_actions) == 0
 
 class TD_MCTS:
-    def __init__(self, env, approximator, iterations=50, exploration_constant=1.41, rollout_depth=10, gamma=0.99):
+    def __init__(self, env, approximator, iterations=100, exploration_constant=1.41, rollout_depth=10, gamma=0.99):
         self.env = env
         self.approximator = approximator
         self.iterations = iterations
         self.c = exploration_constant
         self.rollout_depth = rollout_depth
         self.gamma = gamma
-
-    def is_terminal(self, sim_env):
-        legal_moves = [a for a in range(4) if sim_env.is_move_legal(a)]
-        return len(legal_moves) == 0
 
     def create_env_from_state(self, state, score):
         new_env = copy.deepcopy(self.env)
@@ -353,148 +355,132 @@ class TD_MCTS:
         return new_env
 
     def select_child(self, node):
+        Qs = [child.total_reward / child.visits for child in node.children.values()]
+        Q_min, Q_max = min(Qs), max(Qs)
+        span = Q_max - Q_min if Q_max > Q_min else 1.0
+
+        best_score = -float('inf')
         best_child = None
-        best_uct = -float('inf')
-        for action, child in node.children.items():
-            if isinstance(child, dict):
-                representative = None
-                max_visits = -1
-                for outcome_key, chance_child in child.items():
-                    if chance_child.visits > max_visits:
-                        max_visits = chance_child.visits
-                        representative = chance_child
-                current_child = representative
-            else:
-                current_child = child
-            exploitation = current_child.total_reward / current_child.visits if current_child.visits > 0 else 0
-            exploration = self.c * math.sqrt(math.log(node.visits) / current_child.visits) if current_child.visits > 0 else float('inf')
-            exploitation /= 1000  # 若需要可以調整 scale
-            uct_value = exploitation + exploration
-            if uct_value > best_uct:
-                best_uct = uct_value
-                best_child = current_child
+        for child in node.children.values():
+            Q_raw = child.total_reward / child.visits
+            Q_norm = (Q_raw - Q_min) / span
+            U = self.c * math.sqrt(math.log(node.visits) / child.visits)
+            score_val = Q_norm + U
+            if score_val > best_score:
+                best_score = score_val
+                best_child = child
         return best_child
 
     def rollout(self, sim_env, depth):
+        sim_env.score = 0
         total_reward = 0.0
         discount = 1.0
-        current_depth = 0
-        while current_depth < depth:
-            legal_moves = [a for a in range(4) if sim_env.is_move_legal(a)]
-            if not legal_moves:
+        prev_score = 0
+
+        for _ in range(depth):
+            legal = [a for a in range(4) if sim_env.is_move_legal(a)]
+            if not legal:
                 break
-            action = random.choice(legal_moves)
-            new_state, reward, done, _ = sim_env.step(action)
-            total_reward += discount * reward
+            a = random.choice(legal)
+            _, new_score, done, _ = sim_env.step(a)
+            r = new_score - prev_score
+            total_reward += discount * r
             discount *= self.gamma
-            current_depth += 1
+            prev_score = new_score
             if done:
                 break
-        value_est = self.approximator.value(sim_env.board)
-        total_reward += discount * value_est
+
+        leaf_legal = [a for a in range(4) if sim_env.is_move_legal(a)]
+        if leaf_legal:
+            best_leaf = -float('inf')
+            for a in leaf_legal:
+                sim_board = simulate_move(sim_env.board, a, sim_env)
+                val = self.approximator.value(sim_board)
+                if val > best_leaf:
+                    best_leaf = val
+            total_reward += discount * best_leaf
         return total_reward
 
     def backpropagate(self, node, reward):
         while node is not None:
             node.visits += 1
             node.total_reward += reward
-            reward *= self.gamma
             node = node.parent
 
     def run_simulation(self, root):
         node = root
         sim_env = self.create_env_from_state(node.state, node.score)
-        
-        while node.fully_expanded() and not self.is_terminal(sim_env):
+        # Selection
+        while node.fully_expanded() and node.children:
             node = self.select_child(node)
-            sim_env = self.create_env_from_state(node.state, node.score)
-        
-        if not self.is_terminal(sim_env) and node.untried_actions:
-            action = random.choice(node.untried_actions)
-            node.untried_actions.remove(action)
-            afterstate = simulate_move(sim_env.board, action, sim_env)
-            empty_positions = list(zip(*np.where(afterstate == 0)))
-            if empty_positions:
-                chance_children = {}
-                for pos in empty_positions:
-                    for tile_value in [2, 4]:
-                        new_state = afterstate.copy()
-                        r, c = pos
-                        new_state[r, c] = tile_value
-                        child_node = TD_MCTS_Node(new_state, sim_env.score, parent=node, action=action)
-                        chance_children[(pos, tile_value)] = child_node
-                node.children[action] = chance_children
-                if chance_children:
-                    chosen_key = random.choice(list(chance_children.keys()))
-                    node = chance_children[chosen_key]
-                    sim_env = self.create_env_from_state(node.state, node.score)
-                else:
-                    child_node = TD_MCTS_Node(afterstate, sim_env.score, parent=node, action=action)
-                    node.children[action] = child_node
-                    node = child_node
-                    sim_env = self.create_env_from_state(node.state, node.score)
-            else:
-                child_node = TD_MCTS_Node(afterstate, sim_env.score, parent=node, action=action)
-                node.children[action] = child_node
-                node = child_node
-                sim_env = self.create_env_from_state(node.state, node.score)
-        
-        rollout_reward = self.rollout(sim_env, self.rollout_depth)
-        self.backpropagate(node, rollout_reward)
+            sim_env.board = simulate_move(sim_env.board, node.action, sim_env)
+            sim_env.add_random_tile()
+
+        # Expansion
+        if node.untried_actions:
+            a = random.choice(node.untried_actions)
+            sim_env.board = simulate_move(sim_env.board, a, sim_env)
+            sim_env.add_random_tile()
+            child = TD_MCTS_Node(sim_env.board.copy(), sim_env.score, self.env, parent=node, action=a)
+            node.children[a] = child
+            node.untried_actions.remove(a)
+            node = child
+
+        reward = self.rollout(sim_env, self.rollout_depth)
+        self.backpropagate(node, reward)
 
     def best_action_distribution(self, root):
-        total_visits = 0
-        for action, child in root.children.items():
-            if isinstance(child, dict):
-                total_visits += sum(c.visits for c in child.values())
-            else:
-                total_visits += child.visits
-        distribution = np.zeros(4)
         best_visits = -1
         best_action = None
         for action, child in root.children.items():
-            if isinstance(child, dict):
-                action_visits = sum(c.visits for c in child.values())
-            else:
-                action_visits = child.visits
-            distribution[action] = action_visits / total_visits if total_visits > 0 else 0
-            if action_visits > best_visits:
-                best_visits = action_visits
+            if child.visits > best_visits:
+                best_visits = child.visits
                 best_action = action
+        distribution = np.zeros(4)
+        if best_action is not None:
+            distribution[best_action] = 1.0
         return best_action, distribution
 
-### ================= 載入 value.pkl 的 approximator 權重 =================
-# 全域建立環境與 approximator
-env = Game2048Env()
-approximator = NTupleApproximator(board_size=4, patterns=TUPLES)
-with open("value.pkl", "rb") as f:
-    approximator.weights = pickle.load(f)
-print("Loaded approximator weights from value.pkl")
-
-### ================= get_action 函式 =================
+# ----------------- Agent 決策函式 -----------------
 def get_action(state, score):
-    """
-    輸入: state (numpy array of board), score (int)
-    輸出: action (0~3)
-    
-    本函式根據當前狀態利用 TD-MCTS 搭配已訓練好的 N-Tuple Approximator 進行搜尋，
-    並返回最佳動作。
-    """
-    # 建立一個環境副本並設置其 board 與 score
-    current_env = copy.deepcopy(env)
-    current_env.board = state.copy()
-    current_env.score = score
-    
-    # 建立 MCTS 樹根
-    root = TD_MCTS_Node(state, score)
-    
-    # 建立 TD-MCTS 搜尋器（可調整 iterations 與 rollout_depth）
-    td_mcts = TD_MCTS(current_env, approximator, iterations=50, exploration_constant=1.41, rollout_depth=10, gamma=0.99)
-    
-    # 執行多次模擬以構建樹
-    for _ in range(td_mcts.iterations):
-        td_mcts.run_simulation(root)
-    
-    # 根據訪問次數選擇最佳動作
-    best_act, dist = td_mcts.best_action_distribution(root)
+    # 根據傳入 state 與 score 建立新的環境實例
+    env = Game2048Env()
+    env.board = state.copy()
+    env.score = score
+
+    global approximator, mcts
+    try:
+        approximator
+    except NameError:
+        approximator = NTupleApproximator(board_size=4, patterns=TUPLES)
+        load_weights(approximator, VALUE_PKL)
+    mcts = TD_MCTS(env, approximator, iterations=100, exploration_constant=1.41, rollout_depth=10, gamma=0.99)
+    root = TD_MCTS_Node(env.board.copy(), env.score, env)
+    for _ in range(mcts.iterations):
+        mcts.run_simulation(root)
+    best_act, _ = mcts.best_action_distribution(root)
+    if best_act is None:
+        legal = [a for a in range(4) if env.is_move_legal(a)]
+        best_act = random.choice(legal) if legal else random.choice(range(4))
     return best_act
+
+# ----------------- __main__ 測試區 (選做) -----------------
+if __name__ == "__main__":
+    env = Game2048Env()
+    approximator = NTupleApproximator(board_size=4, patterns=TUPLES)
+    load_weights(approximator, VALUE_PKL)
+    mcts = TD_MCTS(env, approximator, iterations=100, exploration_constant=1.41, rollout_depth=10, gamma=0.99)
+
+    state = env.reset()
+    env.render()
+
+    done = False
+    while not done:
+        root = TD_MCTS_Node(state, env.score, env)
+        for _ in range(mcts.iterations):
+            mcts.run_simulation(root)
+        action = mcts.best_action_distribution(root)[0]
+        print("Selected action:", action)
+        state, reward, done, _ = env.step(action)
+        env.render(action=action)
+    print("Game over, final score:", env.score)
