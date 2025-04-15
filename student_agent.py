@@ -34,8 +34,8 @@ TEXT_COLOR = {
     2: "#776e65", 4: "#776e65", 8: "#f9f6f2", 16: "#f9f6f2",
     32: "#f9f6f2", 64: "#f9f6f2", 128: "#f9f6f2", 256: "#f9f6f2",
     512: "#f9f6f2", 1024: "#f9f6f2", 2048: "#f9f6f2", 4096: "#f9f6f2"
-
 }
+
 class Game2048Env(gym.Env):
     def __init__(self):
         super(Game2048Env, self).__init__()
@@ -494,9 +494,11 @@ def get_action(state, score):
     env.score = score
 
     global approximator, mcts
-    
-    approximator = NTupleApproximator(board_size=4, patterns=TUPLES)
-    load_weights(approximator, VALUE_PKL)
+    try:
+        approximator
+    except NameError:
+        approximator = NTupleApproximator(board_size=4, patterns=TUPLES)
+        load_weights(approximator, VALUE_PKL)
     mcts = TD_MCTS(env, approximator, iterations=100, exploration_constant=1.41, rollout_depth=0, gamma=0.99)
     root = TD_MCTS_Node(env.board.copy(), env.score, env)
     for _ in range(mcts.iterations):
