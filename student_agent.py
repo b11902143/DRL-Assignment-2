@@ -494,11 +494,9 @@ def get_action(state, score):
     env.score = score
 
     global approximator, mcts
-    try:
-        approximator
-    except NameError:
-        approximator = NTupleApproximator(board_size=4, patterns=TUPLES)
-        load_weights(approximator, VALUE_PKL)
+    
+    approximator = NTupleApproximator(board_size=4, patterns=TUPLES)
+    load_weights(approximator, VALUE_PKL)
     mcts = TD_MCTS(env, approximator, iterations=100, exploration_constant=1.41, rollout_depth=10, gamma=0.99)
     root = TD_MCTS_Node(env.board.copy(), env.score, env)
     for _ in range(mcts.iterations):
