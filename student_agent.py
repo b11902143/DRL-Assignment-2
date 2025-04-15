@@ -499,7 +499,7 @@ def get_action(state, score):
         approximator
     except NameError:
         approximator = NTupleApproximator(board_size=4, patterns=TUPLES)
-        load_weights(approximator, "checkpoint_30000.pkl")
+        load_weights(approximator, "value.pkl")
     
     # 取得所有合法動作
     legal_moves = [a for a in range(4) if env.is_move_legal(a)]
